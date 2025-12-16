@@ -36,7 +36,7 @@ for filenames in os.listdir(infolder):
     fullpath=os.path.join(infolder,filenames)
     print(f"Scanning:{filenames}...")
     img,loc=engine.get_faces_robust(fullpath)
-    if len(locs)==0:
+    if len(loc)==0:
         print(f" ->No faces found moving to nofaces folder.")
         nofacefold=os.path.join(outfolder,"NoFaces")
         os.makedirs(nofacefold,exist_ok=True)
