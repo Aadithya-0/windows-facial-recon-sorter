@@ -1,3 +1,4 @@
+from fileinput import filename
 import os
 import cv2
 import numpy
@@ -8,7 +9,9 @@ def compute_similarity(embedding1,embedding2):
     return similarity
 def register_faces(source_dir,output_dir,engine):
     known_faces=[]
-    files=os.listdir(source_dir)
+    files = [f for f in os.listdir(source_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.bmp'))]
+    # Sort by size to get high quality 'anchors' first
+    files.sort(key=lambda x: os.path.getsize(os.path.join(source_dir, x)), reverse=True)    
     c=0
     for filename in files:
         img_path=os.path.join(source_dir,filename)
@@ -20,24 +23,33 @@ def register_faces(source_dir,output_dir,engine):
         found_people_in_this_image = set()
         for i, face in enumerate(faces):
             current_embedding = face.embedding
-            max_score=0.0
+            global_max_score=0.0
             best_name="unknown"
             for person in known_faces:
-                known_vec=person['embedding']
-                score=compute_similarity(current_embedding,known_vec)
-                if score>max_score:
-                    max_score=score
+                known_vec=person['embeddings']
+                person_score=[compute_similarity(current_embedding,past_emb) for past_emb in person['embeddings']]
+                if not person_score:
+                    continue
+                best_score_for_this_person=max(person_score)
+                if best_score_for_this_person>global_max_score:
+                    global_max_score=best_score_for_this_person
                     best_name=person['name']
-            if max_score>0.5:
+            if global_max_score>0.45:
                 final_name=best_name
-                print(f"Match found: {filename} is {final_name}")
+                print(f"Match: {filename} face {i} is {final_name} (Score: {global_max_score:.2f})")
+                for p in known_faces:
+                    if p['name']==final_name:
+                        p['embeddings'].append(current_embedding)
+                        break
             else:
+                if global_max_score>0.3:
+                    print(f"No Match: {filename} face {i} closest was {best_name} but score {global_max_score:.2f} was too low.")
                 c+=1
                 final_name="person"+str(c)
                 print(f"New face: {filename} is {final_name}")
                 known_faces.append({
                     'name': final_name,
-                    'embedding': current_embedding
+                    'embeddings': [current_embedding]
                 })
                 print(f"New Face Discovered in {filename}: {final_name}")
             if final_name not in found_people_in_this_image:       
