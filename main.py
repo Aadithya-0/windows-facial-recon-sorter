@@ -4,25 +4,41 @@ import cv2
 import numpy
 import shutil
 from engine import FaceEngine
+from db import VectorDB
 def compute_similarity(embedding1,embedding2):
     similarity=numpy.dot(embedding1,embedding2)/(numpy.linalg.norm(embedding1)*numpy.linalg.norm(embedding2))
     return similarity
 def register_faces(source_dir,output_dir,engine):
-    known_faces=[]
+    db=VectorDB()
+    known_faces=db.get_known_people()
     files = [f for f in os.listdir(source_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.bmp'))]
     # Sort by size to get high quality 'anchors' first
     files.sort(key=lambda x: os.path.getsize(os.path.join(source_dir, x)), reverse=True)    
     c=0
+    for p in known_faces:
+        try:
+            num=int(p['name'].replace("person",""))
+            if num>c:c=num
+        except:
+            pass
+    print(f"resuming from person count : {c}")
     for filename in files:
-        img_path=os.path.join(source_dir,filename)
-        img=cv2.imread(img_path)
-        faces=engine.process_image(img)
-        if len(faces)==0:
-            print(f"Skipping {filename} no face found")
-            continue
+        img_path = os.path.join(source_dir, filename)
+        cached_embeddings = db.get_file_embeddings(filename)
+        face_embeddings = []
+        if cached_embeddings is not None:
+            # HIT! We know this file. Use the cache.
+            face_embeddings = cached_embeddings
+        else:
+            # MISS! We need to process it.
+            img = cv2.imread(img_path)
+            if img is None: continue
+            faces = engine.process_image(img)
+            face_embeddings = [face.embedding for face in faces]
+            db.add_file_embeddings(filename, face_embeddings)
         found_people_in_this_image = set()
-        for i, face in enumerate(faces):
-            current_embedding = face.embedding
+        for i, face in enumerate(face_embeddings):
+            current_embedding = face
             global_max_score=0.0
             best_name="unknown"
             for person in known_faces:
@@ -61,6 +77,9 @@ def register_faces(source_dir,output_dir,engine):
                 
                 found_people_in_this_image.add(final_name)
                 print(f"-> Copied {filename} to {final_name}")
+    db.update_known_people(known_faces)
+    db.save_data()
+    print("DB saved")
 if __name__=='__main__':
     engine=FaceEngine(use_gpu=False)
     base_dir = os.path.dirname(os.path.abspath(__file__))
