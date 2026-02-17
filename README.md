@@ -76,9 +76,9 @@ windows-facial-recon-sorter/
 ├── engine.py         # FaceEngine class wrapping InsightFace
 ├── db.py            # VectorDB class for caching embeddings
 ├── clear.py         # Utility to clear sorted results
-├── face_cache.pkl   # Cache file storing processed embeddings
-├── testimage/       # Input folder for images to process
-└── sorted_results/  # Output folder with sorted images
+├── face_cache.pkl   # Cache file storing processed embeddings (auto-generated)
+├── testimage/       # Input folder for images to process (create this)
+└── sorted_results/  # Output folder with sorted images (auto-generated)
 ```
 
 ## How It Works
