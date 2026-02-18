@@ -5,10 +5,14 @@ import numpy
 import shutil
 from engine import FaceEngine
 from db import VectorDB
+
+
 def compute_similarity(embedding1,embedding2):
     similarity=numpy.dot(embedding1,embedding2)/(numpy.linalg.norm(embedding1)*numpy.linalg.norm(embedding2))
     return similarity
-def register_faces(source_dir,output_dir,engine):
+
+
+def register_faces(source_dir,output_dir,engine, progress_callback=None):
     db=VectorDB()
     known_faces=db.get_known_people()
     # NEW WAY (Recursive / Subfolders):
@@ -26,7 +30,8 @@ def register_faces(source_dir,output_dir,engine):
     # Sort by file size (High Quality First)
     image_files.sort(key=lambda x: os.path.getsize(x), reverse=True)
 
-    print(f"Found {len(image_files)} images across all subfolders.")
+    total_files = len(image_files)
+    print(f"Found {total_files} images across all subfolders.")
     c=0
     for p in known_faces:
         try:
@@ -35,7 +40,7 @@ def register_faces(source_dir,output_dir,engine):
         except:
             pass
     print(f"resuming from person count : {c}")
-    for img_path in image_files:  # iterating directly over full paths now
+    for index, img_path in enumerate(image_files):  # iterating directly over full paths now
         filename = os.path.basename(img_path)  # Extract basename for the DB key
         cached_embeddings = db.get_file_embeddings(filename)
         face_embeddings = []
@@ -90,22 +95,43 @@ def register_faces(source_dir,output_dir,engine):
                 
                 found_people_in_this_image.add(final_name)
                 print(f"-> Copied {filename} to {final_name}")
+
+        # Report progress back to optional callback (for GUI progress bar)
+        if progress_callback is not None and total_files > 0:
+            progress = float(index + 1) / float(total_files)
+            progress_callback(progress)
     db.update_known_people(known_faces)
     db.save_data()
     print("DB saved")
-if __name__=='__main__':
-    engine=FaceEngine(use_gpu=False)
+
+def process_folder(folder_path, progress_callback=None):
+    """Entry point used by gui.py to process a folder of images.
+
+    folder_path: Path selected by the user (absolute or relative).
+    progress_callback: Optional function taking a single float 0.0-1.0 for progress updates.
+    """
+    engine = FaceEngine(use_gpu=False)
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    source_folder = os.path.join(base_dir, "testimage")
+
+    # Allow both absolute and relative folder paths
+    if os.path.isabs(folder_path):
+        source_folder = folder_path
+    else:
+        source_folder = os.path.join(base_dir, folder_path)
+
     output_folder = os.path.join(base_dir, "sorted_results")
+
     if not os.path.exists(source_folder):
-        print(f"Error: Could not find folder: {source_folder}")
-        exit()
+        raise FileNotFoundError(f"Error: Could not find folder: {source_folder}")
+
     print(f"Processing images from: {source_folder}")
-    register_faces(source_folder, output_folder, engine)
-    # faces1=engine.process_image(img)
-    # vector1=faces1[0].embedding
-    # faces2=engine.process_image(img2)
-    # vector2=faces2[0].embedding
-    # similarity=compute_similarity(vector1,vector2)
-    #print("Similarity score between the two faces is :", similarity)
+    register_faces(source_folder, output_folder, engine, progress_callback)
+
+    return output_folder
+
+
+if __name__=='__main__':
+    # Allow running this file directly for testing without affecting gui.py imports
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    default_source = os.path.join(base_dir, "testimage")
+    process_folder(default_source)
