@@ -2,7 +2,7 @@ import shutil
 import os
 
 # CONFIGURATION
-folder_to_clear = "sorted"
+folder_to_clear = "sorted_results"
 
 def clear_folder():
     # 1. Check if folder exists
