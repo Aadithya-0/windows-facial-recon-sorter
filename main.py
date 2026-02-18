@@ -11,9 +11,22 @@ def compute_similarity(embedding1,embedding2):
 def register_faces(source_dir,output_dir,engine):
     db=VectorDB()
     known_faces=db.get_known_people()
-    files = [f for f in os.listdir(source_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.bmp'))]
-    # Sort by size to get high quality 'anchors' first
-    files.sort(key=lambda x: os.path.getsize(os.path.join(source_dir, x)), reverse=True)    
+    # NEW WAY (Recursive / Subfolders):
+    image_files = []
+    print(f"Scanning '{source_dir}' for images...")
+
+    # os.walk automatically dives into every subfolder
+    for root, dirs, files in os.walk(source_dir):
+        for file in files:
+            if file.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.bmp')):
+                # We save the FULL path so we can find it later
+                full_path = os.path.join(root, file)
+                image_files.append(full_path)
+
+    # Sort by file size (High Quality First)
+    image_files.sort(key=lambda x: os.path.getsize(x), reverse=True)
+
+    print(f"Found {len(image_files)} images across all subfolders.")
     c=0
     for p in known_faces:
         try:
@@ -22,8 +35,8 @@ def register_faces(source_dir,output_dir,engine):
         except:
             pass
     print(f"resuming from person count : {c}")
-    for filename in files:
-        img_path = os.path.join(source_dir, filename)
+    for img_path in image_files:  # iterating directly over full paths now
+        filename = os.path.basename(img_path)  # Extract basename for the DB key
         cached_embeddings = db.get_file_embeddings(filename)
         face_embeddings = []
         if cached_embeddings is not None:
