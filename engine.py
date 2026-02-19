@@ -1,28 +1,29 @@
-import shutil
 import os
 import cv2
-import face_recognition
 import numpy as np
-from pathlib import Path
+from insightface.app import FaceAnalysis
 class FaceEngine:
-    def __init__(self,use_cnn=True):
-        self.model="cnn" if use_cnn else "hog"
-        self.upsample=1
-        print(f"   [Engine] Initialized using model: {self.model}")       
-    def get_faces_robust(self,image_path):
-        image=face_recognition.load_image_file(image_path)
-        locs=face_recognition.face_locations(image,model=self.model)
-        if len(locs)>0:
-            print("->Found face directly")
-            return image,locs
-        rot_img=np.rot90(image,k=1)
-        locs=face_recognition.face_locations(rot_img,model=self.model)
-        if len(locs)>0:
-            print("->Found face after 90 degree rotation")
-            return rot_img,locs
-        rot_img=np.rot90(image,k=3)
-        locs=face_recognition.face_locations(rot_img,model=self.model)
-        if len(locs)>0:
-            print("->Found face 270 degree rotation")
-            return rot_img,locs
-        return image,[]
+    def __init__(self,use_gpu=True):
+        self.app=FaceAnalysis(name='buffalo_l')
+        if use_gpu:
+            self.app.prepare(ctx_id=0,det_size=(640,640))
+        else:
+            self.app.prepare(ctx_id=-1,det_size=(640,640))
+    def process_image(self,img_bgr):
+        faces=self.app.get(img_bgr)
+        for face in faces:
+            print("Score is :", face.det_score)
+            print("Embedding shape is :", face.embedding.shape)
+        return faces
+if __name__=="__main__":
+    engine=FaceEngine(use_gpu=False)
+    base_dir = os.path.dirname(__file__)
+    img_path = os.path.join(base_dir, "testimage", "LH.jpg")    
+    img=cv2.imread(img_path)
+    if img is None:
+        print("ERROR: Could not load image!")
+        print("Please check that the folder 'testimage' exists and contains 'LH.jpg'")
+    else:
+        print(f"Image loaded successfully. Shape: {img.shape}")
+    faces=engine.process_image(img)
+    print(f"Found {len(faces)} faces.")
