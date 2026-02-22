@@ -1,15 +1,17 @@
 # Windows Facial Recognition Sorter
 
-A Python-based facial recognition system that automatically organizes photos by identifying and grouping people using deep learning face embeddings.
+A Python-based facial recognition system that automatically organizes photos by identifying and grouping people using deep learning face embeddings. It features both a graphical user interface (GUI) and a command-line interface.
 
 ## Features
 
+- **Graphical User Interface**: Browse and select any folder using the built-in GUI
 - **Automatic Face Detection**: Uses InsightFace's state-of-the-art face detection model (buffalo_l)
 - **Face Recognition**: Groups photos by person using facial embeddings and similarity matching
 - **Smart Caching**: Caches face embeddings to avoid reprocessing images
 - **Incremental Processing**: Can resume processing from where it left off
 - **Quality-First Processing**: Processes larger images first to establish high-quality "anchor" faces
 - **Multi-Face Support**: Handles multiple faces in a single image
+- **Subfolder Scanning**: Recursively scans all subfolders in the selected directory
 
 ## Requirements
 
@@ -18,6 +20,8 @@ A Python-based facial recognition system that automatically organizes photos by 
 - NumPy
 - InsightFace
 - ONNX Runtime (for InsightFace models)
+- Flet (for the GUI)
+- Tkinter (included with most Python installations)
 
 ## Installation
 
@@ -29,14 +33,28 @@ cd windows-facial-recon-sorter
 
 2. Install the required dependencies:
 ```bash
-pip install opencv-python numpy insightface onnxruntime
+pip install opencv-python numpy insightface onnxruntime flet
 ```
 
 **Note**: For GPU acceleration, install `onnxruntime-gpu` instead of `onnxruntime`.
 
 ## Usage
 
-### Basic Usage
+### GUI Usage (Recommended)
+
+1. Launch the GUI application:
+```bash
+python gui.py
+```
+
+2. Click **Browse** to select any folder containing your images, or paste the folder path directly into the text field
+3. Click **Start Sorting** to begin processing
+4. A progress bar will show the processing status
+5. Once complete, the results are displayed as a grid of person thumbnails
+   - Click any name label to edit it, then press **Enter** to save the new name
+6. Find the sorted results in the `sorted_results` folder, organized by person
+
+### Command-Line Usage
 
 1. Create a `testimage` folder in the project directory
 2. Place your images in the `testimage` folder (supports `.jpg`, `.jpeg`, `.png`, `.webp`, `.bmp`)
@@ -61,7 +79,7 @@ python clear.py
   engine = FaceEngine(use_gpu=True)  # Set to False for CPU-only
   ```
 
-- **Similarity Threshold**: The matching threshold (default: 0.45) can be adjusted in `main.py` line 53:
+- **Similarity Threshold**: The matching threshold (default: 0.45) can be adjusted in `main.py`:
   ```python
   if global_max_score > 0.45:  # Adjust this value
   ```
@@ -72,18 +90,18 @@ python clear.py
 
 ```
 windows-facial-recon-sorter/
-├── main.py           # Main entry point for face recognition and sorting
+├── gui.py            # Graphical user interface (Flet-based)
+├── main.py           # Core face recognition and sorting logic
 ├── engine.py         # FaceEngine class wrapping InsightFace
 ├── db.py            # VectorDB class for caching embeddings
 ├── clear.py         # Utility to clear sorted results
 ├── face_cache.pkl   # Cache file storing processed embeddings (auto-generated)
-├── testimage/       # Input folder for images to process (create this)
 └── sorted_results/  # Output folder with sorted images (auto-generated)
 ```
 
 ## How It Works
 
-1. **Image Processing**: The system reads images from the `testimage` folder
+1. **Image Processing**: The system reads images from the selected folder (and all subfolders)
 2. **Face Detection**: InsightFace detects all faces in each image
 3. **Embedding Extraction**: Each face is converted to a 512-dimensional embedding vector
 4. **Similarity Matching**: New faces are compared against known faces using cosine similarity
