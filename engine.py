@@ -9,6 +9,9 @@ class FaceEngine:
             self.app.prepare(ctx_id=0,det_size=(640,640))
         else:
             self.app.prepare(ctx_id=-1,det_size=(640,640))
+    def _ensure_loaded(self):
+        """No-op since model loads in __init__. Kept for API compat."""
+        pass
     def process_image(self,img_bgr):
         faces=self.app.get(img_bgr)
         for face in faces:

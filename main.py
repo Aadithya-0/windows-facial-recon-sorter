@@ -1,119 +1,149 @@
-from fileinput import filename
 import os
 import cv2
-import numpy
+import numpy as np
 import shutil
 from engine import FaceEngine
 from db import VectorDB
 
 
-def compute_similarity(embedding1,embedding2):
-    similarity=numpy.dot(embedding1,embedding2)/(numpy.linalg.norm(embedding1)*numpy.linalg.norm(embedding2))
-    return similarity
+def _batch_best_similarity(current_embedding, known_faces):
+    """Vectorised cosine similarity against all known people.
+    Returns (best_name, best_score)."""
+    best_name = "unknown"
+    best_score = 0.0
+    cur = np.asarray(current_embedding, dtype=np.float32)
+    cur_norm = np.linalg.norm(cur)
+    if cur_norm == 0:
+        return best_name, best_score
+    for person in known_faces:
+        embs = person['embeddings']
+        if not embs:
+            continue
+        mat = np.array(embs, dtype=np.float32)
+        norms = np.linalg.norm(mat, axis=1)
+        norms[norms == 0] = 1e-10
+        scores = mat @ cur / (norms * cur_norm)
+        top = float(np.max(scores))
+        if top > best_score:
+            best_score = top
+            best_name = person['name']
+    return best_name, best_score
 
 
-def register_faces(source_dir,output_dir,engine, progress_callback=None):
-    db=VectorDB()
-    known_faces=db.get_known_people()
-    # NEW WAY (Recursive / Subfolders):
+def _already_sorted(output_dir, filename):
+    """Check if this filename is already present in any person folder."""
+    if not os.path.isdir(output_dir):
+        return False
+    for person_dir in os.listdir(output_dir):
+        if os.path.isfile(os.path.join(output_dir, person_dir, filename)):
+            return True
+    return False
+
+
+def register_faces(source_dir, output_dir, engine, progress_callback=None):
+    db = VectorDB()
+    known_faces = db.get_known_people()
+
+    # Collect all image files recursively
     image_files = []
-    print(f"Scanning '{source_dir}' for images...")
-
-    # os.walk automatically dives into every subfolder
     for root, dirs, files in os.walk(source_dir):
         for file in files:
             if file.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.bmp')):
-                # We save the FULL path so we can find it later
-                full_path = os.path.join(root, file)
-                image_files.append(full_path)
+                image_files.append(os.path.join(root, file))
 
-    # Sort by file size (High Quality First)
+    # Sort by file size (high-quality first)
     image_files.sort(key=lambda x: os.path.getsize(x), reverse=True)
 
     total_files = len(image_files)
     print(f"Found {total_files} images across all subfolders.")
-    c=0
+
+    # Build a set of already-sorted filenames for O(1) lookup
+    sorted_set = set()
+    if os.path.isdir(output_dir):
+        for d in os.listdir(output_dir):
+            dp = os.path.join(output_dir, d)
+            if os.path.isdir(dp):
+                for f in os.listdir(dp):
+                    sorted_set.add(f)
+
+    # Resume person counter
+    c = 0
     for p in known_faces:
         try:
-            num=int(p['name'].replace("person",""))
-            if num>c:c=num
+            num = int(p['name'].replace("person", ""))
+            if num > c:
+                c = num
         except:
             pass
-    print(f"resuming from person count : {c}")
-    for index, img_path in enumerate(image_files):  # iterating directly over full paths now
-        filename = os.path.basename(img_path)  # Extract basename for the DB key
+    print(f"Resuming from person count: {c}")
+
+    engine_loaded = False  # defer heavy model load until needed
+
+    for index, img_path in enumerate(image_files):
+        filename = os.path.basename(img_path)
+
+        # ── Fast path: already sorted ──
+        if filename in sorted_set:
+            if progress_callback and total_files > 0:
+                progress_callback(index + 1, total_files, filename, True)
+            continue
+
+        # ── Get or compute embeddings ──
         cached_embeddings = db.get_file_embeddings(filename)
-        face_embeddings = []
         if cached_embeddings is not None:
-            # HIT! We know this file. Use the cache.
             face_embeddings = cached_embeddings
         else:
-            # MISS! We need to process it.
+            # Need the model – lazy-load once
+            if not engine_loaded:
+                engine._ensure_loaded()  # no-op if already loaded
+                engine_loaded = True
             img = cv2.imread(img_path)
-            if img is None: continue
+            if img is None:
+                if progress_callback and total_files > 0:
+                    progress_callback(index + 1, total_files, filename, True)
+                continue
             faces = engine.process_image(img)
             face_embeddings = [face.embedding for face in faces]
             db.add_file_embeddings(filename, face_embeddings)
+
         found_people_in_this_image = set()
-        for i, face in enumerate(face_embeddings):
-            current_embedding = face
-            global_max_score=0.0
-            best_name="unknown"
-            for person in known_faces:
-                known_vec=person['embeddings']
-                person_score=[compute_similarity(current_embedding,past_emb) for past_emb in person['embeddings']]
-                if not person_score:
-                    continue
-                best_score_for_this_person=max(person_score)
-                if best_score_for_this_person>global_max_score:
-                    global_max_score=best_score_for_this_person
-                    best_name=person['name']
-            if global_max_score>0.45:
-                final_name=best_name
-                print(f"Match: {filename} face {i} is {final_name} (Score: {global_max_score:.2f})")
+        for i, current_embedding in enumerate(face_embeddings):
+            best_name, best_score = _batch_best_similarity(current_embedding, known_faces)
+
+            if best_score > 0.45:
+                final_name = best_name
                 for p in known_faces:
-                    if p['name']==final_name:
+                    if p['name'] == final_name:
                         p['embeddings'].append(current_embedding)
                         break
             else:
-                if global_max_score>0.3:
-                    print(f"No Match: {filename} face {i} closest was {best_name} but score {global_max_score:.2f} was too low.")
-                c+=1
-                final_name="person"+str(c)
-                print(f"New face: {filename} is {final_name}")
-                known_faces.append({
-                    'name': final_name,
-                    'embeddings': [current_embedding]
-                })
-                print(f"New Face Discovered in {filename}: {final_name}")
-            if final_name not in found_people_in_this_image:       
-                person_folder = os.path.join(output_dir, final_name)
-                if not os.path.exists(person_folder):
-                    os.makedirs(person_folder)
-                
-                shutil.copy(img_path, os.path.join(person_folder, filename))
-                
-                found_people_in_this_image.add(final_name)
-                print(f"-> Copied {filename} to {final_name}")
+                c += 1
+                final_name = "person" + str(c)
+                known_faces.append({'name': final_name, 'embeddings': [current_embedding]})
 
-        # Report progress back to optional callback (for GUI progress bar)
-        if progress_callback is not None and total_files > 0:
-            progress = float(index + 1) / float(total_files)
-            progress_callback(progress)
+            if final_name not in found_people_in_this_image:
+                person_folder = os.path.join(output_dir, final_name)
+                os.makedirs(person_folder, exist_ok=True)
+                dest = os.path.join(person_folder, filename)
+                if not os.path.exists(dest):
+                    shutil.copy(img_path, dest)
+                sorted_set.add(filename)
+                found_people_in_this_image.add(final_name)
+
+        # Report progress
+        if progress_callback and total_files > 0:
+            progress_callback(index + 1, total_files, filename, False)
+
     db.update_known_people(known_faces)
     db.save_data()
     print("DB saved")
 
-def process_folder(folder_path, progress_callback=None):
-    """Entry point used by gui.py to process a folder of images.
 
-    folder_path: Path selected by the user (absolute or relative).
-    progress_callback: Optional function taking a single float 0.0-1.0 for progress updates.
-    """
+def process_folder(folder_path, progress_callback=None):
+    """Entry point used by gui.py to process a folder of images."""
     engine = FaceEngine(use_gpu=False)
     base_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # Allow both absolute and relative folder paths
     if os.path.isabs(folder_path):
         source_folder = folder_path
     else:
